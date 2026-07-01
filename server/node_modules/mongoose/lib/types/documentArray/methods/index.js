@@ -2,7 +2,6 @@
 
 const ArrayMethods = require('../../array/methods');
 const Document = require('../../../document');
-const castObjectId = require('../../../cast/objectid');
 const getDiscriminatorByValue = require('../../../helpers/discriminator/getDiscriminatorByValue');
 const internalToObjectOptions = require('../../../options').internalToObjectOptions;
 const utils = require('../../../utils');
@@ -13,6 +12,7 @@ const arrayPathSymbol = require('../../../helpers/symbols').arrayPathSymbol;
 const arraySchemaSymbol = require('../../../helpers/symbols').arraySchemaSymbol;
 const documentArrayParent = require('../../../helpers/symbols').documentArrayParent;
 
+const _baseReverse = Array.prototype.reverse;
 const _baseToString = Array.prototype.toString;
 
 const methods = {
@@ -26,7 +26,7 @@ const methods = {
 
   toString() {
     return _baseToString.call(this.__array.map(subdoc => {
-      if (subdoc != null && subdoc.$__ != null) {
+      if (subdoc?.$__ != null) {
         return subdoc.toString();
       }
       return subdoc;
@@ -41,6 +41,13 @@ const methods = {
     return this[arrayParentSymbol];
   },
 
+  /*!
+   * ignore
+   */
+  $schemaType() {
+    return this[arraySchemaSymbol];
+  },
+
   /**
    * Overrides MongooseArray#cast
    *
@@ -53,13 +60,13 @@ const methods = {
     if (this[arraySchemaSymbol] == null) {
       return value;
     }
-    let Constructor = this[arraySchemaSymbol].casterConstructor;
+    let Constructor = this[arraySchemaSymbol].Constructor;
     const isInstance = Constructor.$isMongooseDocumentArray ?
       utils.isMongooseDocumentArray(value) :
       value instanceof Constructor;
     if (isInstance ||
         // Hack re: #5001, see #5005
-        (value && value.constructor && value.constructor.baseCasterConstructor === Constructor)) {
+        value?.constructor?.baseCasterConstructor === Constructor) {
       if (!(value[documentArrayParent] && value.__parentArray)) {
         // value may have been created using array.create()
         value[documentArrayParent] = this[arrayParentSymbol];
@@ -69,7 +76,7 @@ const methods = {
       return value;
     }
 
-    if (value === undefined || value === null) {
+    if (value == null) {
       return null;
     }
 
@@ -113,23 +120,36 @@ const methods = {
    *     const embeddedDoc = m.array.id(some_id);
    *
    * @return {EmbeddedDocument|null} the subdocument or null if not found.
-   * @param {ObjectId|String|Number|Buffer} id
-   * @TODO cast to the _id based on schema for proper comparison
+   * @param {ObjectId|string|number|Buffer} id
    * @method id
    * @api public
    * @memberOf MongooseDocumentArray
    */
 
   id(id) {
-    let casted;
-    let sid;
-    let _id;
-
-    try {
-      casted = castObjectId(id).toString();
-    } catch (e) {
-      casted = null;
+    if (id == null) {
+      return null;
     }
+
+    const schemaType = this[arraySchemaSymbol];
+    let idSchemaType = null;
+
+    if (schemaType?.schema) {
+      idSchemaType = schemaType.schema.path('_id');
+    } else if (schemaType?.casterConstructor?.schema) {
+      idSchemaType = schemaType.casterConstructor.schema.path('_id');
+    }
+
+    let castedId = null;
+    if (idSchemaType) {
+      try {
+        castedId = idSchemaType.cast(id);
+      } catch {
+        // ignore error
+      }
+    }
+
+    let _id;
 
     for (const val of this) {
       if (!val) {
@@ -138,18 +158,20 @@ const methods = {
 
       _id = val.get('_id');
 
-      if (_id === null || typeof _id === 'undefined') {
+      if (_id == null) {
         continue;
       } else if (_id instanceof Document) {
-        sid || (sid = String(id));
-        if (sid == _id._id) {
+        _id = _id.get('_id');
+        if (castedId != null && utils.deepEqual(castedId, _id)) {
+          return val;
+        } else if (castedId == null && (id == _id || utils.deepEqual(id, _id))) {
+          // Backwards compat: compare user-specified param to _id using loose equality
           return val;
         }
-      } else if (!isBsonType(id, 'ObjectId') && !isBsonType(_id, 'ObjectId')) {
-        if (id == _id || utils.deepEqual(id, _id)) {
-          return val;
-        }
-      } else if (casted == _id) {
+      } else if (castedId != null && utils.deepEqual(castedId, _id)) {
+        return val;
+      } else if (castedId == null && (_id == id || utils.deepEqual(id, _id))) {
+        // Backwards compat: compare user-specified param to _id using loose equality
         return val;
       }
     }
@@ -164,7 +186,7 @@ const methods = {
    *
    * _Each sub-document is converted to a plain object by calling its `#toObject` method._
    *
-   * @param {Object} [options] optional options to pass to each documents `toObject` method call during conversion
+   * @param {object} [options] optional options to pass to each documents `toObject` method call during conversion
    * @return {Array}
    * @method toObject
    * @api public
@@ -190,16 +212,45 @@ const methods = {
   },
 
   /**
-   * Wraps [`Array#push`](https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/Array/push) with proper change tracking.
+   * Wraps [`Array#push`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/push) with proper change tracking.
    *
-   * @param {...Object} [args]
+   * @param {...object} [args]
    * @api public
    * @method push
    * @memberOf MongooseDocumentArray
    */
 
   push() {
+    const shouldReindex = _shouldReindexAfterPush(arguments);
     const ret = ArrayMethods.push.apply(this, arguments);
+
+    if (shouldReindex) {
+      _updateSubdocIndexes(this);
+    }
+    _updateParentPopulated(this);
+
+    return ret;
+  },
+
+  /**
+   * Wraps [`Array#pop`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/pop) with proper change tracking.
+   * @api private
+   */
+
+  pop() {
+    const ret = ArrayMethods.pop.apply(this, arguments);
+
+    _updateParentPopulated(this);
+
+    return ret;
+  },
+
+  /*!
+   * ignore
+   */
+
+  $pop() {
+    const ret = ArrayMethods.$pop.apply(this, arguments);
 
     _updateParentPopulated(this);
 
@@ -209,7 +260,7 @@ const methods = {
   /**
    * Pulls items from the array atomically.
    *
-   * @param {...Object} [args]
+   * @param {...object} [args]
    * @api public
    * @method pull
    * @memberOf MongooseDocumentArray
@@ -218,32 +269,96 @@ const methods = {
   pull() {
     const ret = ArrayMethods.pull.apply(this, arguments);
 
+    _updateSubdocIndexes(this);
     _updateParentPopulated(this);
 
     return ret;
   },
 
   /**
-   * Wraps [`Array#shift`](https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/Array/unshift) with proper change tracking.
+   * Wraps [`Array#shift`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/shift) with proper change tracking.
    * @api private
    */
 
   shift() {
     const ret = ArrayMethods.shift.apply(this, arguments);
 
+    _updateSubdocIndexes(this);
+    _updateParentPopulated(this);
+
+    return ret;
+  },
+
+  /*!
+   * ignore
+   */
+
+  $shift() {
+    const ret = ArrayMethods.$shift.apply(this, arguments);
+
+    _updateSubdocIndexes(this);
     _updateParentPopulated(this);
 
     return ret;
   },
 
   /**
-   * Wraps [`Array#splice`](https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/Array/splice) with proper change tracking and casting.
+   * Wraps [`Array#splice`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/splice) with proper change tracking and casting.
    * @api private
    */
 
   splice() {
     const ret = ArrayMethods.splice.apply(this, arguments);
 
+    _updateSubdocIndexes(this);
+    _updateParentPopulated(this);
+
+    return ret;
+  },
+
+  /**
+   * Wraps [`Array#reverse`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/reverse)
+   * with proper change tracking.
+   * @api private
+   */
+
+  reverse() {
+    _baseReverse.call(this.__array);
+    this._registerAtomic('$set', this);
+
+    _updateSubdocIndexes(this);
+    _updateParentPopulated(this);
+
+    return this;
+  },
+
+  /**
+   * Wraps [`Array#sort`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/sort)
+   * with proper change tracking.
+   *
+   * @param {Function} [compareFunction]
+   * @api private
+   */
+
+  sort() {
+    const ret = ArrayMethods.sort.apply(this, arguments);
+
+    _updateSubdocIndexes(this);
+    _updateParentPopulated(this);
+
+    return ret;
+  },
+
+  /**
+   * Wraps [`Array#unshift`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/unshift)
+   * with proper change tracking.
+   * @api private
+   */
+
+  unshift() {
+    const ret = ArrayMethods.unshift.apply(this, arguments);
+
+    _updateSubdocIndexes(this);
     _updateParentPopulated(this);
 
     return ret;
@@ -266,14 +381,14 @@ const methods = {
    *
    * This is the same subdocument constructor used for casting.
    *
-   * @param {Object} obj the value to cast to this arrays SubDocument schema
+   * @param {object} obj the value to cast to this arrays SubDocument schema
    * @method create
    * @api public
    * @memberOf MongooseDocumentArray
    */
 
   create(obj) {
-    let Constructor = this[arraySchemaSymbol].casterConstructor;
+    let Constructor = this[arraySchemaSymbol].Constructor;
     if (obj &&
         Constructor.discriminators &&
         Constructor.schema &&
@@ -367,6 +482,26 @@ const methods = {
 };
 
 module.exports = methods;
+
+/*!
+ * ignore
+ */
+
+function _updateSubdocIndexes(arr) {
+  const rawArray = utils.isMongooseArray(arr) ? arr.__array : arr;
+
+  for (let i = 0; i < rawArray.length; ++i) {
+    if (typeof rawArray[i]?.$setIndex === 'function') {
+      rawArray[i].$setIndex(i);
+    }
+  }
+}
+
+function _shouldReindexAfterPush(args) {
+  return args[0] != null &&
+    utils.hasUserDefinedProperty(args[0], '$each') &&
+    args[0].$position != null;
+}
 
 /**
  * If this is a document array, each element may contain single

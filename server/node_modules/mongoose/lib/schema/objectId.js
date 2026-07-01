@@ -7,7 +7,6 @@
 const SchemaObjectIdOptions = require('../options/schemaObjectIdOptions');
 const SchemaType = require('../schemaType');
 const castObjectId = require('../cast/objectid');
-const createJSONSchemaTypeDefinition = require('../helpers/createJSONSchemaTypeDefinition');
 const getConstructorName = require('../helpers/getConstructorName');
 const oid = require('../types/objectid');
 const isBsonType = require('../helpers/isBsonType');
@@ -19,22 +18,24 @@ let Document;
 /**
  * ObjectId SchemaType constructor.
  *
- * @param {String} key
- * @param {Object} options
+ * @param {string} key
+ * @param {object} options
+ * @param {object} schemaOptions
+ * @param {Schema} parentSchema
  * @inherits SchemaType
  * @api public
  */
 
-function SchemaObjectId(key, options) {
+function SchemaObjectId(key, options, _schemaOptions, parentSchema) {
   const isKeyHexStr = typeof key === 'string' && key.length === 24 && /^[a-f0-9]+$/i.test(key);
-  const suppressWarning = options && options.suppressWarning;
+  const suppressWarning = options?.suppressWarning;
   if ((isKeyHexStr || typeof key === 'undefined') && !suppressWarning) {
     utils.warn('mongoose: To create a new ObjectId please try ' +
       '`Mongoose.Types.ObjectId` instead of using ' +
-      '`Mongoose.Schema.ObjectId`. Set the `suppressWarning` option if ' +
+      '`Mongoose.Schema.Types.ObjectId`. Set the `suppressWarning` option if ' +
       'you\'re trying to create a hex char path in your schema.');
   }
-  SchemaType.call(this, key, options, 'ObjectId');
+  SchemaType.call(this, key, options, 'ObjectId', parentSchema);
 }
 
 /**
@@ -80,13 +81,13 @@ SchemaObjectId.get = SchemaType.get;
  * #### Example:
  *
  *     // Make all object ids have option `required` equal to true.
- *     mongoose.Schema.ObjectId.set('required', true);
+ *     mongoose.Schema.Types.ObjectId.set('required', true);
  *
  *     const Order = mongoose.model('Order', new Schema({ userId: ObjectId }));
  *     new Order({ }).validateSync().errors.userId.message; // Path `userId` is required.
  *
- * @param {String} option The option you'd like to set the value for
- * @param {Any} value value for option
+ * @param {string} option The option you'd like to set the value for
+ * @param {any} value value for option
  * @return {undefined}
  * @function set
  * @static
@@ -99,7 +100,7 @@ SchemaObjectId.setters = [];
 
 /**
  * Adds an auto-generated ObjectId default if turnOn is true.
- * @param {Boolean} turnOn auto generated ObjectId defaults
+ * @param {boolean} turnOn auto generated ObjectId defaults
  * @api public
  * @return {SchemaType} this
  */
@@ -143,7 +144,7 @@ SchemaObjectId._cast = castObjectId;
  *
  * @param {Function} caster
  * @return {Function}
- * @function get
+ * @function cast
  * @static
  * @api public
  */
@@ -195,9 +196,9 @@ SchemaObjectId.checkRequired = SchemaType.checkRequired;
 /**
  * Check if the given value satisfies a required validator.
  *
- * @param {Any} value
+ * @param {any} value
  * @param {Document} doc
- * @return {Boolean}
+ * @return {boolean}
  * @api public
  */
 
@@ -218,9 +219,9 @@ SchemaObjectId.prototype.checkRequired = function checkRequired(value, doc) {
 /**
  * Casts to ObjectId
  *
- * @param {Object} value
- * @param {Object} doc
- * @param {Boolean} init whether this is an initialization cast
+ * @param {object} value
+ * @param {object} doc
+ * @param {boolean} init whether this is an initialization cast
  * @api private
  */
 
@@ -260,13 +261,28 @@ function handleSingle(val) {
   return this.cast(val);
 }
 
-SchemaObjectId.prototype.$conditionalHandlers = {
+const $conditionalHandlers = {
   ...SchemaType.prototype.$conditionalHandlers,
   $gt: handleSingle,
   $gte: handleSingle,
   $lt: handleSingle,
   $lte: handleSingle
 };
+
+/**
+ * Contains the handlers for different query operators for this schema type.
+ * For example, `$conditionalHandlers.$in` is the function Mongoose calls to cast `$in` filter operators.
+ *
+ * @property $conditionalHandlers
+ * @memberOf SchemaObjectId
+ * @instance
+ * @api public
+ */
+
+Object.defineProperty(SchemaObjectId.prototype, '$conditionalHandlers', {
+  enumerable: false,
+  value: $conditionalHandlers
+});
 
 /*!
  * ignore
@@ -294,14 +310,24 @@ function resetId(v) {
 /**
  * Returns this schema type's representation in a JSON schema.
  *
- * @param [options]
- * @param [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
- * @returns {Object} JSON schema properties
+ * @param {object} [options]
+ * @param {boolean} [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
+ * @returns {object} JSON schema properties
+ * @api public
  */
 
 SchemaObjectId.prototype.toJSONSchema = function toJSONSchema(options) {
-  const isRequired = (this.options.required && typeof this.options.required !== 'function') || this.path === '_id';
-  return createJSONSchemaTypeDefinition('string', 'objectId', options?.useBsonType, isRequired);
+  const jsonSchema = this._createJSONSchemaTypeDefinition('string', 'objectId', options);
+  // `bsonType: 'objectId'` already validates ObjectIds, so the regex is only useful
+  // for the portable `type: 'string'` representation (e.g. for ajv, zod, etc.)
+  if (!options?.useBsonType) {
+    jsonSchema.pattern = '^[A-Fa-f0-9]{24}$';
+  }
+  return jsonSchema;
+};
+
+SchemaObjectId.prototype.autoEncryptionType = function autoEncryptionType() {
+  return 'objectId';
 };
 
 /*!

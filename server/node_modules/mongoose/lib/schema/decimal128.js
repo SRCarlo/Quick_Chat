@@ -7,20 +7,21 @@
 const SchemaType = require('../schemaType');
 const CastError = SchemaType.CastError;
 const castDecimal128 = require('../cast/decimal128');
-const createJSONSchemaTypeDefinition = require('../helpers/createJSONSchemaTypeDefinition');
 const isBsonType = require('../helpers/isBsonType');
 
 /**
  * Decimal128 SchemaType constructor.
  *
- * @param {String} key
- * @param {Object} options
+ * @param {string} key
+ * @param {object} options
+ * @param {object} schemaOptions
+ * @param {Schema} parentSchema
  * @inherits SchemaType
  * @api public
  */
 
-function SchemaDecimal128(key, options) {
-  SchemaType.call(this, key, options, 'Decimal128');
+function SchemaDecimal128(key, options, _schemaOptions, parentSchema) {
+  SchemaType.call(this, key, options, 'Decimal128', parentSchema);
 }
 
 /**
@@ -51,13 +52,13 @@ SchemaDecimal128._cast = castDecimal128;
  * #### Example:
  *
  *     // Make all decimal 128s have `required` of true by default.
- *     mongoose.Schema.Decimal128.set('required', true);
+ *     mongoose.Schema.Types.Decimal128.set('required', true);
  *
  *     const User = mongoose.model('User', new Schema({ test: mongoose.Decimal128 }));
  *     new User({ }).validateSync().errors.test.message; // Path `test` is required.
  *
- * @param {String} option The option you'd like to set the value for
- * @param {Any} value value for option
+ * @param {string} option The option you'd like to set the value for
+ * @param {any} value value for option
  * @return {undefined}
  * @function set
  * @static
@@ -74,7 +75,7 @@ SchemaDecimal128.setters = [];
  * #### Example:
  *
  *     // Automatically convert Decimal128s to Numbers
- *     mongoose.Schema.Decimal128.get(v => v == null ? v : Number(v));
+ *     mongoose.Schema.Types.Decimal128.get(v => v == null ? v : Number(v));
  *
  * @param {Function} getter
  * @return {this}
@@ -152,9 +153,9 @@ SchemaDecimal128.checkRequired = SchemaType.checkRequired;
 /**
  * Check if the given value satisfies a required validator.
  *
- * @param {Any} value
+ * @param {any} value
  * @param {Document} doc
- * @return {Boolean}
+ * @return {boolean}
  * @api public
  */
 
@@ -175,9 +176,9 @@ SchemaDecimal128.prototype.checkRequired = function checkRequired(value, doc) {
 /**
  * Casts to Decimal128
  *
- * @param {Object} value
- * @param {Object} doc
- * @param {Boolean} init whether this is an initialization cast
+ * @param {object} value
+ * @param {object} doc
+ * @param {boolean} init whether this is an initialization cast
  * @api private
  */
 
@@ -214,7 +215,7 @@ function handleSingle(val) {
   return this.cast(val);
 }
 
-SchemaDecimal128.prototype.$conditionalHandlers = {
+const $conditionalHandlers = {
   ...SchemaType.prototype.$conditionalHandlers,
   $gt: handleSingle,
   $gte: handleSingle,
@@ -223,16 +224,34 @@ SchemaDecimal128.prototype.$conditionalHandlers = {
 };
 
 /**
+ * Contains the handlers for different query operators for this schema type.
+ * For example, `$conditionalHandlers.$lte` is the function Mongoose calls to cast `$lte` filter operators.
+ *
+ * @property $conditionalHandlers
+ * @memberOf SchemaDecimal128
+ * @instance
+ * @api public
+ */
+
+Object.defineProperty(SchemaDecimal128.prototype, '$conditionalHandlers', {
+  enumerable: false,
+  value: $conditionalHandlers
+});
+
+/**
  * Returns this schema type's representation in a JSON schema.
  *
- * @param [options]
- * @param [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
- * @returns {Object} JSON schema properties
+ * @param {object} [options]
+ * @param {boolean} [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
+ * @returns {object} JSON schema properties
  */
 
 SchemaDecimal128.prototype.toJSONSchema = function toJSONSchema(options) {
-  const isRequired = this.options.required && typeof this.options.required !== 'function';
-  return createJSONSchemaTypeDefinition('string', 'decimal', options?.useBsonType, isRequired);
+  return this._createJSONSchemaTypeDefinition('string', 'decimal', options);
+};
+
+SchemaDecimal128.prototype.autoEncryptionType = function autoEncryptionType() {
+  return 'decimal';
 };
 
 /*!

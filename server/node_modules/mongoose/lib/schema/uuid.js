@@ -4,21 +4,18 @@
 
 'use strict';
 
-const MongooseBuffer = require('../types/buffer');
 const SchemaType = require('../schemaType');
 const CastError = SchemaType.CastError;
 const castUUID = require('../cast/uuid');
-const createJSONSchemaTypeDefinition = require('../helpers/createJSONSchemaTypeDefinition');
 const utils = require('../utils');
 const handleBitwiseOperator = require('./operators/bitwise');
 
 const UUID_FORMAT = castUUID.UUID_FORMAT;
-const Binary = MongooseBuffer.Binary;
 
 /**
  * Convert binary to a uuid string
- * @param {Buffer|Binary|String} uuidBin The value to process
- * @returns {String} The completed uuid-string
+ * @param {Buffer|Binary|string} uuidBin The value to process
+ * @returns {string} The completed uuid-string
  * @api private
  */
 function binaryToString(uuidBin) {
@@ -35,29 +32,16 @@ function binaryToString(uuidBin) {
 /**
  * UUIDv1 SchemaType constructor.
  *
- * @param {String} key
- * @param {Object} options
+ * @param {string} key
+ * @param {object} options
+ * @param {object} _schemaOptions
+ * @param {Schema} parentSchema
  * @inherits SchemaType
  * @api public
  */
 
-function SchemaUUID(key, options) {
-  SchemaType.call(this, key, options, 'UUID');
-  this.getters.push(function(value) {
-    // For populated
-    if (value != null && value.$__ != null) {
-      return value;
-    }
-    if (Buffer.isBuffer(value)) {
-      return binaryToString(value);
-    } else if (value instanceof Binary) {
-      return binaryToString(value.buffer);
-    } else if (utils.isPOJO(value) && value.type === 'Buffer' && Array.isArray(value.data)) {
-      // Cloned buffers look like `{ type: 'Buffer', data: [5, 224, ...] }`
-      return binaryToString(Buffer.from(value.data));
-    }
-    return value;
-  });
+function SchemaUUID(key, options, _schemaOptions, parentSchema) {
+  SchemaType.call(this, key, options, 'UUID', parentSchema);
 }
 
 /**
@@ -113,8 +97,8 @@ SchemaUUID.get = SchemaType.get;
  *     const User = mongoose.model('User', new Schema({ test: mongoose.UUID }));
  *     new User({ }).validateSync().errors.test.message; // Path `test` is required.
  *
- * @param {String} option The option you'd like to set the value for
- * @param {Any} value value for option
+ * @param {string} option The option you'd like to set the value for
+ * @param {any} value value for option
  * @return {undefined}
  * @function set
  * @static
@@ -181,8 +165,8 @@ SchemaUUID.checkRequired = SchemaType.checkRequired;
 /**
  * Check if the given value satisfies a required validator.
  *
- * @param {Any} value
- * @return {Boolean}
+ * @param {any} value
+ * @return {boolean}
  * @api public
  */
 
@@ -196,9 +180,9 @@ SchemaUUID.prototype.checkRequired = function checkRequired(value) {
 /**
  * Casts to UUID
  *
- * @param {Object} value
- * @param {Object} doc
- * @param {Boolean} init whether this is an initialization cast
+ * @param {object} value
+ * @param {object} doc
+ * @param {boolean} init whether this is an initialization cast
  * @api private
  */
 
@@ -242,26 +226,37 @@ function handleArray(val) {
   });
 }
 
-SchemaUUID.prototype.$conditionalHandlers = {
+const $conditionalHandlers = {
   ...SchemaType.prototype.$conditionalHandlers,
   $bitsAllClear: handleBitwiseOperator,
   $bitsAnyClear: handleBitwiseOperator,
   $bitsAllSet: handleBitwiseOperator,
   $bitsAnySet: handleBitwiseOperator,
   $all: handleArray,
-  $gt: handleSingle,
-  $gte: handleSingle,
   $in: handleArray,
-  $lt: handleSingle,
-  $lte: handleSingle,
   $ne: handleSingle,
   $nin: handleArray
 };
 
 /**
+ * Contains the handlers for different query operators for this schema type.
+ * For example, `$conditionalHandlers.$exists` is the function Mongoose calls to cast `$exists` filter operators.
+ *
+ * @property $conditionalHandlers
+ * @memberOf SchemaUUID
+ * @instance
+ * @api public
+ */
+
+Object.defineProperty(SchemaUUID.prototype, '$conditionalHandlers', {
+  enumerable: false,
+  value: $conditionalHandlers
+});
+
+/**
  * Casts contents for queries.
  *
- * @param {String} $conditional
+ * @param {string} $conditional
  * @param {any} val
  * @api private
  */
@@ -288,14 +283,17 @@ SchemaUUID.prototype.castForQuery = function($conditional, val, context) {
 /**
  * Returns this schema type's representation in a JSON schema.
  *
- * @param [options]
- * @param [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
- * @returns {Object} JSON schema properties
+ * @param {object} [options]
+ * @param {boolean} [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
+ * @returns {object} JSON schema properties
  */
 
 SchemaUUID.prototype.toJSONSchema = function toJSONSchema(options) {
-  const isRequired = this.options.required && typeof this.options.required !== 'function';
-  return createJSONSchemaTypeDefinition('string', 'binData', options?.useBsonType, isRequired);
+  return this._createJSONSchemaTypeDefinition('string', 'binData', options);
+};
+
+SchemaUUID.prototype.autoEncryptionType = function autoEncryptionType() {
+  return 'binData';
 };
 
 /*!

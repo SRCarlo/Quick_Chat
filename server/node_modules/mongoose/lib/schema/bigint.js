@@ -7,19 +7,20 @@
 const CastError = require('../error/cast');
 const SchemaType = require('../schemaType');
 const castBigInt = require('../cast/bigint');
-const createJSONSchemaTypeDefinition = require('../helpers/createJSONSchemaTypeDefinition');
 
 /**
  * BigInt SchemaType constructor.
  *
- * @param {String} path
- * @param {Object} options
+ * @param {string} path
+ * @param {object} options
+ * @param {object} schemaOptions
+ * @param {Schema} parentSchema
  * @inherits SchemaType
  * @api public
  */
 
-function SchemaBigInt(path, options) {
-  SchemaType.call(this, path, options, 'BigInt');
+function SchemaBigInt(path, options, _schemaOptions, parentSchema) {
+  SchemaType.call(this, path, options, 'BigInt', parentSchema);
 }
 
 /**
@@ -50,10 +51,10 @@ SchemaBigInt._cast = castBigInt;
  * #### Example:
  *
  *     // Make all bigints required by default
- *     mongoose.Schema.BigInt.set('required', true);
+ *     mongoose.Schema.Types.BigInt.set('required', true);
  *
- * @param {String} option The option you'd like to set the value for
- * @param {Any} value value for option
+ * @param {string} option The option you'd like to set the value for
+ * @param {any} value value for option
  * @return {undefined}
  * @function set
  * @static
@@ -70,7 +71,7 @@ SchemaBigInt.setters = [];
  * #### Example:
  *
  *     // Convert bigints to numbers
- *     mongoose.Schema.BigInt.get(v => v == null ? v : Number(v));
+ *     mongoose.Schema.Types.BigInt.get(v => v == null ? v : Number(v));
  *
  * @param {Function} getter
  * @return {this}
@@ -88,7 +89,7 @@ SchemaBigInt.get = SchemaType.get;
  *
  *     // Make Mongoose cast empty string '' to false.
  *     const original = mongoose.Schema.Types.BigInt.cast();
- *     mongoose.Schema.BigInt.cast(v => {
+ *     mongoose.Schema.Types.BigInt.cast(v => {
  *       if (v === '') {
  *         return false;
  *       }
@@ -96,11 +97,11 @@ SchemaBigInt.get = SchemaType.get;
  *     });
  *
  *     // Or disable casting entirely
- *     mongoose.Schema.BigInt.cast(false);
+ *     mongoose.Schema.Types.BigInt.cast(false);
  *
  * @param {Function} caster
  * @return {Function}
- * @function get
+ * @function cast
  * @static
  * @api public
  */
@@ -139,8 +140,8 @@ SchemaBigInt.checkRequired = SchemaType.checkRequired;
 /**
  * Check if the given value satisfies a required validator.
  *
- * @param {Any} value
- * @return {Boolean}
+ * @param {any} value
+ * @return {boolean}
  * @api public
  */
 
@@ -151,8 +152,8 @@ SchemaBigInt.prototype.checkRequired = function(value) {
 /**
  * Casts to bigint
  *
- * @param {Object} value
- * @param {Object} model this value is optional
+ * @param {object} value
+ * @param {object} model this value is optional
  * @api private
  */
 
@@ -177,13 +178,28 @@ SchemaBigInt.prototype.cast = function(value) {
  * ignore
  */
 
-SchemaBigInt.$conditionalHandlers = {
+const $conditionalHandlers = {
   ...SchemaType.prototype.$conditionalHandlers,
   $gt: handleSingle,
   $gte: handleSingle,
   $lt: handleSingle,
   $lte: handleSingle
 };
+
+/**
+ * Contains the handlers for different query operators for this schema type.
+ * For example, `$conditionalHandlers.$in` is the function Mongoose calls to cast `$in` filter operators.
+ *
+ * @property $conditionalHandlers
+ * @memberOf SchemaBigInt
+ * @instance
+ * @api public
+ */
+
+Object.defineProperty(SchemaBigInt.prototype, '$conditionalHandlers', {
+  enumerable: false,
+  value: $conditionalHandlers
+});
 
 /*!
  * ignore
@@ -196,7 +212,7 @@ function handleSingle(val, context) {
 /**
  * Casts contents for queries.
  *
- * @param {String} $conditional
+ * @param {string} $conditional
  * @param {any} val
  * @api private
  */
@@ -204,7 +220,7 @@ function handleSingle(val, context) {
 SchemaBigInt.prototype.castForQuery = function($conditional, val, context) {
   let handler;
   if ($conditional != null) {
-    handler = SchemaBigInt.$conditionalHandlers[$conditional];
+    handler = this.$conditionalHandlers[$conditional];
 
     if (handler) {
       return handler.call(this, val);
@@ -244,14 +260,17 @@ SchemaBigInt.prototype._castNullish = function _castNullish(v) {
 /**
  * Returns this schema type's representation in a JSON schema.
  *
- * @param [options]
- * @param [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
- * @returns {Object} JSON schema properties
+ * @param {object} [options]
+ * @param {boolean} [options.useBsonType=false] If true, return a representation with `bsonType` for use with MongoDB's `$jsonSchema`.
+ * @returns {object} JSON schema properties
  */
 
 SchemaBigInt.prototype.toJSONSchema = function toJSONSchema(options) {
-  const isRequired = this.options.required && typeof this.options.required !== 'function';
-  return createJSONSchemaTypeDefinition('string', 'long', options?.useBsonType, isRequired);
+  return this._createJSONSchemaTypeDefinition('string', 'long', options);
+};
+
+SchemaBigInt.prototype.autoEncryptionType = function autoEncryptionType() {
+  return 'long';
 };
 
 /*!

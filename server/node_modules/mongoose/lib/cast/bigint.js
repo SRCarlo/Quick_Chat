@@ -1,13 +1,13 @@
 'use strict';
 
-const { Long } = require('bson');
+const { Long } = require('mongodb/lib/bson');
 
 /**
  * Given a value, cast it to a BigInt, or throw an `Error` if the value
  * cannot be casted. `null` and `undefined` are considered valid.
  *
- * @param {Any} value
- * @return {Number}
+ * @param {any} value
+ * @return {bigint|null|undefined}
  * @throws {Error} if `value` is not one of the allowed values
  * @api private
  */
