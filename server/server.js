@@ -64,9 +64,8 @@ app.use("/api/auth", userRouter);
 app.use("/api/messages", messageRouter);
 
 // Connect to MongoDB
-await connectDB();
+connectDB();
 
-// Local development server
 if (process.env.NODE_ENV !== "production") {
   const PORT = process.env.PORT || 5000;
 
@@ -75,5 +74,4 @@ if (process.env.NODE_ENV !== "production") {
   });
 }
 
-// Export for Vercel
-export default server;
+export default app;
